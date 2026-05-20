@@ -1,187 +1,2023 @@
 """
-app.py — Streamlit UI for the Daily Meal Planner.
-All display / interaction code lives here.
-Business logic is imported from meal_logic.py.
+app.py — Modern Streamlit UI for the Daily Meal Planner.
+
+This file controls the user interface only.
+The AI/business logic stays in meal_logic.py:
+- generate_meal_plan()
+- generate_meal_image()
+- speak_narration()
 """
 
+import html
 import os
 import tempfile
+import base64
+from typing import Any
+
 import streamlit as st
 
-from meal_logic import generate_meal_plan, generate_meal_image, speak_narration
+from meal_logic import generate_meal_image, generate_meal_plan, speak_narration
 
-st.set_page_config(page_title="Daily Meal Planner", page_icon="🥗", layout="wide")
 
-# ---------------------------------------------------------------------------
-# Custom CSS
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Page config
+# -----------------------------------------------------------------------------
 
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500&display=swap');
-    html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-    .main-title { font-family: 'Playfair Display', serif; font-size: 3rem; font-weight: 700; color: #1a3c2e; letter-spacing: -0.02em; margin-bottom: 0; }
-    .subtitle { font-size: 1.05rem; color: #5a7a6a; font-weight: 300; margin-top: 0.25rem; margin-bottom: 2rem; }
-    .section-label { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: #6b8f7e; margin-bottom: 0.4rem; }
-    .stButton > button { background-color: #1a3c2e; color: #f0f7f4; border: none; border-radius: 6px; padding: 0.6rem 1.8rem; font-family: 'DM Sans', sans-serif; font-weight: 500; font-size: 0.95rem; letter-spacing: 0.03em; transition: background 0.2s; width: 100%; }
-    .stButton > button:hover { background-color: #2d6b4a; }
-    .stTextInput > div > div > input, .stTextArea > div > div > textarea, .stNumberInput > div > div > input { border-radius: 6px; border: 1.5px solid #d0e4da; font-family: 'DM Sans', sans-serif; }
-    div[data-testid="stExpander"] { border: 1.5px solid #d0e4da; border-radius: 8px; }
-    .tag { display: inline-block; background: #dff0e8; color: #1a3c2e; border-radius: 20px; padding: 0.2rem 0.75rem; font-size: 0.8rem; font-weight: 500; margin-right: 0.4rem; }
-    .narration-box { background: #f7faf8; border-left: 4px solid #3d8b5e; border-radius: 0 8px 8px 0; padding: 1rem 1.25rem; margin-bottom: 1rem; }
-    </style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-
-st.markdown('<p class="main-title">🥗 Daily Meal Planner</p>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="subtitle">Generate a personalised daily meal plan powered by AI — '
-    "breakfast, lunch, and dinner in seconds.</p>",
-    unsafe_allow_html=True,
+st.set_page_config(
+    page_title="Daily Meal Planner",
+    page_icon="🥗",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
-st.divider()
 
-# ---------------------------------------------------------------------------
-# Sidebar — technical settings only (no narration toggle here anymore)
-# ---------------------------------------------------------------------------
 
-with st.sidebar:
-    st.markdown("### ⚙️ Settings")
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
-    if "OPENAI_API_KEY" in st.secrets:
-        os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+def safe_text(value: Any, fallback: str = "") -> str:
+    """Convert any value to safe display text."""
+    if value is None:
+        return fallback
+    return str(value).strip() or fallback
 
-    st.markdown("---")
 
-    kcal = st.number_input("Daily calorie target (kcal)",
-        min_value=800, max_value=5000, value=2000, step=50)
+def escape(value: Any, fallback: str = "") -> str:
+    """Escape text before placing it inside custom HTML."""
+    return html.escape(safe_text(value, fallback))
 
-    exact_ingredients = st.toggle("Use ONLY listed ingredients", value=False,
-        help="When on, the AI will not add any extra ingredients.")
 
-    model_choice = st.selectbox("Chat model",
-        ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"], index=2)
+def as_list(value: Any) -> list[str]:
+    """
+    Normalize strings/lists/dicts into a simple list of strings for display.
 
-    temperature = st.slider("Creativity (temperature)",
-        min_value=0.0, max_value=2.0, value=1.0, step=0.1)
+    This makes the UI more forgiving in case meal_logic.py returns ingredients or
+    instructions in slightly different shapes.
+    """
+    if value is None:
+        return []
 
-    generate_images = st.toggle("Generate dish images", value=False,
-        help="Generates one image per meal using gpt-image-1.")
+    if isinstance(value, list):
+        return [safe_text(item) for item in value if safe_text(item)]
 
-    st.markdown("---")
+    if isinstance(value, tuple):
+        return [safe_text(item) for item in value if safe_text(item)]
 
-# ---------------------------------------------------------------------------
-# Main form — ingredients + options + narration selection all in one place
-# ---------------------------------------------------------------------------
+    if isinstance(value, dict):
+        items = []
+        for key, item in value.items():
+            key_text = safe_text(key)
+            item_text = safe_text(item)
+            if key_text and item_text:
+                items.append(f"{key_text}: {item_text}")
+            elif item_text:
+                items.append(item_text)
+        return items
 
-col_left, col_right = st.columns([2, 1], gap="large")
+    text = safe_text(value)
+    if not text:
+        return []
 
-with col_left:
-    st.markdown('<p class="section-label">Base Ingredients</p>', unsafe_allow_html=True)
-    ingredients = st.text_area(
-        label="Ingredients", label_visibility="collapsed",
-        value=(
-            "extra-virgin olive oil, whole grains, fresh fruits and vegetables, "
-            "nuts and seeds, fish, eggs, fermented foods, honey"
-        ),
-        height=110,
-        placeholder="e.g. chicken, broccoli, quinoa, lemon, garlic …",
+    # Split on new lines first. If no lines, try commas.
+    lines = [line.strip(" •-*") for line in text.splitlines() if line.strip(" •-*")]
+    if len(lines) > 1:
+        return lines
+
+    comma_items = [item.strip() for item in text.split(",") if item.strip()]
+    return comma_items if len(comma_items) > 1 else [text]
+
+
+def get_meal_value(meal: dict[str, Any], possible_keys: list[str], fallback: Any = None) -> Any:
+    """Read a value from a meal dict using several possible key names."""
+    for key in possible_keys:
+        if key in meal and meal[key] not in (None, ""):
+            return meal[key]
+    return fallback
+
+
+def get_meal_title(key: str, meal: dict[str, Any], titles: list[str]) -> str:
+    """Return the best title for a meal card."""
+    default_titles = {
+        "breakfast": "Breakfast",
+        "lunch": "Lunch",
+        "dinner": "Dinner",
+    }
+
+    title = get_meal_value(meal, ["title", "name", "meal_title"], "")
+    if title:
+        return safe_text(title)
+
+    index_by_key = {"breakfast": 0, "lunch": 1, "dinner": 2}
+    index = index_by_key.get(key)
+    if index is not None and index < len(titles):
+        return safe_text(titles[index], default_titles.get(key, "Meal"))
+
+    return default_titles.get(key, "Meal")
+
+
+def get_meal_calories(meal: dict[str, Any]) -> str:
+    calories = get_meal_value(meal, ["calories", "kcal", "estimated_calories"], "")
+    if not calories:
+        return ""
+    calories_text = safe_text(calories)
+    return calories_text if "cal" in calories_text.lower() else f"{calories_text} kcal"
+
+
+def parse_ingredients(raw_ingredients: str) -> list[str]:
+    """Split the comma-separated ingredient field into clean chip labels."""
+    return [item.strip() for item in raw_ingredients.split(",") if item.strip()]
+
+
+def remove_ingredient_from_input(raw_ingredients: str, ingredient_to_remove: str) -> str:
+    """Remove one ingredient chip from the comma-separated input text."""
+    remaining = [
+        item for item in parse_ingredients(raw_ingredients)
+        if item != ingredient_to_remove
+    ]
+    return ", ".join(remaining)
+
+
+def remove_ingredient_chip(ingredient_to_remove: str) -> None:
+    """Update the ingredient text area after a chip remove button is clicked."""
+    current_value = st.session_state.get("ingredients_input", "")
+    st.session_state["ingredients_input"] = remove_ingredient_from_input(
+        current_value,
+        ingredient_to_remove,
     )
 
-with col_right:
-    st.markdown('<p class="section-label">Extra Notes (optional)</p>', unsafe_allow_html=True)
-    extra = st.text_input(label="Extra notes", label_visibility="collapsed",
-        placeholder="e.g. spicy, low-carb …")
 
-    st.markdown('<p class="section-label" style="margin-top:0.75rem">Dietary Restriction (optional)</p>', unsafe_allow_html=True)
-    diet = st.text_input(label="Diet", label_visibility="collapsed",
-        placeholder="e.g. vegan, gluten-free …")
+def render_bullets(items: list[str], max_items: int = 6) -> str:
+    """Create compact bullet HTML."""
+    if not items:
+        return '<p class="muted-small">No details returned.</p>'
 
-# ── Narration selection — below the two columns, above the button ─────────
-st.markdown("---")
-st.markdown('<p class="section-label">🔊 Audio Narration — select meals to narrate</p>', unsafe_allow_html=True)
+    shown = items[:max_items]
+    extra = len(items) - len(shown)
 
-narration_cols = st.columns([1, 1, 1, 2])   # 3 checkboxes + voice/quality options
+    bullets = "".join(f"<li>{escape(item)}</li>" for item in shown)
+    if extra > 0:
+        bullets += f"<li class='muted-small'>+{extra} more</li>"
+    return f"<ul>{bullets}</ul>"
 
-with narration_cols[0]:
-    narrate_breakfast = st.checkbox("🌅 Breakfast", value=False)
-with narration_cols[1]:
-    narrate_lunch     = st.checkbox("☀️ Lunch",     value=False)
-with narration_cols[2]:
-    narrate_dinner    = st.checkbox("🌙 Dinner",    value=False)
 
-# Voice + quality options only appear when at least one meal is ticked
-any_narration = narrate_breakfast or narrate_lunch or narrate_dinner
-with narration_cols[3]:
-    if any_narration:
-        voice_col, quality_col = st.columns(2)
-        with voice_col:
-            tts_voice = st.selectbox("Voice",
-                ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
-                index=0, label_visibility="visible")
-        with quality_col:
-            tts_quality = st.radio("Quality", ["tts-1", "tts-1-hd"],
-                index=0, label_visibility="visible",
-                help="tts-1 is faster; tts-1-hd sounds better.")
-    else:
-        tts_voice   = "alloy"
-        tts_quality = "tts-1"
+def render_compact_bullets(items: list[str], max_items: int = 5) -> str:
+    """Create compact bullet HTML for the reference-style result cards."""
+    if not items:
+        return "<ul><li>No details returned.</li></ul>"
+    shown = items[:max_items]
+    return "<ul>" + "".join(f"<li>{escape(item)}</li>" for item in shown) + "</ul>"
 
-st.markdown("---")
 
-# Build the list of meal keys selected for narration
-narrate_keys = []
-if narrate_breakfast: narrate_keys.append("breakfast")
-if narrate_lunch:     narrate_keys.append("lunch")
-if narrate_dinner:    narrate_keys.append("dinner")
+def meal_icon(key: str) -> str:
+    return {
+        "breakfast": "🌅",
+        "lunch": "☀️",
+        "dinner": "🌙",
+    }.get(key, "🍽️")
 
-generate_btn = st.button("✨ Generate Meal Plan", use_container_width=True)
 
-# ---------------------------------------------------------------------------
-# Generation — meal plan + TTS in one single wait
-# ---------------------------------------------------------------------------
+def meal_label(key: str) -> str:
+    return {
+        "breakfast": "Breakfast",
+        "lunch": "Lunch",
+        "dinner": "Dinner",
+    }.get(key, "Meal")
+
+
+def meal_keys_from_data(meals: dict[str, Any]) -> list[str]:
+    """
+    Prefer breakfast/lunch/dinner order.
+    If meal_logic returns extra keys, append them after the standard keys.
+    """
+    standard = ["breakfast", "lunch", "dinner"]
+    found = [key for key in standard if key in meals]
+    extras = [key for key in meals.keys() if key not in standard]
+    return found + extras
+
+
+def image_data_uri(image_bytes: bytes | None) -> str:
+    """Convert generated image bytes into an embeddable data URI."""
+    if not image_bytes:
+        return ""
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def audio_data_uri(audio_bytes: bytes | None) -> str:
+    """Convert generated narration bytes into an embeddable MP3 data URI."""
+    if not audio_bytes:
+        return ""
+    encoded = base64.b64encode(audio_bytes).decode("ascii")
+    return f"data:audio/mp3;base64,{encoded}"
+
+
+def local_image_data_uri(path: str) -> str:
+    """Convert a local image asset into an embeddable data URI."""
+    if not os.path.exists(path):
+        return ""
+    with open(path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+HERO_SALAD_URI = local_image_data_uri("assets/hero-salad.png")
+HERO_BG_URI = local_image_data_uri("assets/hero-integrated-bg.png")
+
+
+# -----------------------------------------------------------------------------
+# Custom CSS
+# -----------------------------------------------------------------------------
+
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --forest: #123f2c;
+  --forest-2: #0f3325;
+  --leaf: #2f7a4f;
+  --sage: #7f9d88;
+  --mint: #edf6ef;
+  --mint-2: #f5faf4;
+  --cream: #fffdf6;
+  --paper: #ffffff;
+  --line: #e4eee8;
+  --text: #24322b;
+  --muted: #6c7a72;
+  --gold: #d9a441;
+  --shadow: 0 24px 70px rgba(18, 63, 44, 0.10);
+  --soft-shadow: 0 14px 36px rgba(18, 63, 44, 0.08);
+}
+
+/* Overall app background */
+html, body, [class*="css"] {
+  font-family: 'Inter', sans-serif;
+}
+
+.stApp {
+  background:
+    radial-gradient(circle at top right, rgba(217, 164, 65, 0.10), transparent 28rem),
+    radial-gradient(circle at 82% 23%, rgba(127, 157, 136, 0.16), transparent 16rem),
+    linear-gradient(135deg, #fffdf6 0%, #fbfaf3 42%, #f7fbf6 100%);
+  color: var(--text);
+}
+
+/* Main content width */
+.block-container {
+  padding-top: 2.35rem;
+  padding-bottom: 4rem;
+  max-width: 1240px;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(47, 122, 79, 0.08), transparent 9rem),
+    radial-gradient(circle at 98% 14%, rgba(217, 164, 65, 0.06), transparent 8rem),
+    linear-gradient(180deg, #fbfbf4 0%, #f6f8ef 52%, #eff7ef 100%);
+  border-right: 1px solid rgba(18, 63, 44, 0.08);
+  font-size: 14px;
+}
+
+[data-testid="stSidebar"] .block-container {
+  padding-top: 14px !important;
+}
+
+.sidebar-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 42px;
+}
+
+.sidebar-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: var(--forest);
+  background: rgba(232, 242, 228, 0.82);
+  font-size: 29px;
+  box-shadow: 0 10px 24px rgba(18, 63, 44, 0.08);
+}
+
+.sidebar-title {
+  margin: 0;
+  font-family: 'Playfair Display', serif !important;
+  color: var(--forest);
+  font-size: 20px !important;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+.sidebar-subtitle {
+  color: var(--muted);
+  font-size: 14px !important;
+  margin-top: 4px;
+}
+
+.sidebar-section-label {
+  color: var(--forest);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 24px;
+}
+
+.sidebar-control-label {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 18px 0 8px;
+}
+
+.sidebar-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1.05rem 0 1.05rem;
+}
+
+.sidebar-toggle-row .sidebar-control-label {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+[data-testid="stSidebar"] .sidebar-control-label {
+  white-space: nowrap;
+}
+
+.tip-card {
+  background:
+    radial-gradient(circle at 0% 22%, rgba(67, 139, 83, 0.14), transparent 5.8rem),
+    linear-gradient(135deg, #eef7e9 0%, #f6faf0 100%);
+  border: 1px solid rgba(18, 63, 44, 0.10);
+  border-radius: 10px;
+  padding: 18px 16px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.46;
+  margin-top: 28px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 12px 28px rgba(18, 63, 44, 0.06);
+}
+
+.tip-card .tip-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tip-card .tip-icon {
+  color: var(--leaf);
+  font-size: 22px;
+  flex: 0 0 auto;
+}
+
+.kcal-card {
+  margin-top: 16px;
+  background: rgba(232, 242, 228, 0.95);
+  border: 1px solid rgba(18, 63, 44, 0.08);
+  border-radius: 9px;
+  padding: 12px 14px;
+}
+
+/* Typography */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--leaf);
+  margin: 0 0 0.75rem;
+}
+
+.hero-title {
+  font-family: 'Playfair Display', serif;
+  color: var(--forest);
+  font-size: clamp(2.45rem, 4vw, 4.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  margin: 0;
+  max-width: 850px;
+}
+
+.hero-subtitle {
+  color: #52685c;
+  font-size: 1.08rem;
+  line-height: 1.6;
+  max-width: 680px;
+  margin: 1rem 0 0;
+}
+
+.section-title {
+  font-family: 'Playfair Display', serif;
+  color: var(--forest);
+  font-size: 2rem;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.section-meta {
+  color: var(--muted);
+  margin-top: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.section-label {
+  color: var(--forest);
+  font-size: 0.94rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.55rem;
+}
+
+.section-label .optional {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+/* Decorative hero food plate */
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 2rem;
+  align-items: center;
+  margin-bottom: 2.2rem;
+}
+
+.food-orb {
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  margin-left: auto;
+  background:
+    radial-gradient(circle at 65% 35%, #8ccf5c 0 8%, transparent 9%),
+    radial-gradient(circle at 43% 38%, #ffb24b 0 7%, transparent 8%),
+    radial-gradient(circle at 35% 62%, #e54b38 0 7%, transparent 8%),
+    radial-gradient(circle at 62% 64%, #f3d17b 0 10%, transparent 11%),
+    radial-gradient(circle at 50% 50%, #f7fff4 0 55%, transparent 56%),
+    linear-gradient(135deg, rgba(255,255,255,0.95), rgba(237,246,239,0.75));
+  box-shadow: 0 30px 80px rgba(18, 63, 44, 0.13);
+  border: 12px solid rgba(255,255,255,0.85);
+  position: relative;
+}
+
+.food-orb:before {
+  content: "🥗";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 5.5rem;
+}
+
+.food-orb:after {
+  content: "✦";
+  position: absolute;
+  right: -1.2rem;
+  top: 1.2rem;
+  color: var(--gold);
+  font-size: 1.8rem;
+}
+
+/* Cards */
+.glass-card {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(18, 63, 44, 0.10);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  padding: 1.4rem;
+  margin-bottom: 1.2rem;
+}
+
+.form-topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1.2rem;
+}
+
+.form-topline p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* Chips */
+.chip-row {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chip,
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #e8f2e4;
+  color: var(--forest);
+  border: 1px solid rgba(18, 63, 44, 0.06);
+  border-radius: 999px;
+  padding: 0.34rem 0.72rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chip-muted {
+  color: var(--muted);
+  background: #f4f6f1;
+}
+
+/* Streamlit widgets */
+.stTextArea textarea,
+.stTextInput input,
+.stNumberInput input,
+.stSelectbox div[data-baseweb="select"] > div,
+.stRadio [role="radiogroup"] {
+  border-radius: 14px !important;
+}
+
+.stTextArea textarea,
+.stTextInput input,
+.stNumberInput input {
+  border: 1px solid #dce9df !important;
+  background: rgba(255,255,255,0.92) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+  font-size: 0.98rem !important;
+}
+
+.stNumberInput [data-baseweb="input"],
+.stNumberInput [data-baseweb="input"] > div,
+.stNumberInput input {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.stNumberInput [data-testid="stNumberInputContainer"],
+.stNumberInput > div > div {
+  border: 1px solid #dce9df !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,0.92) !important;
+  overflow: hidden;
+}
+
+.stNumberInput button {
+  color: var(--forest) !important;
+  border-radius: 0 !important;
+}
+
+.stNumberInput button:hover,
+.stNumberInput button:focus,
+.stNumberInput button:focus-visible,
+.stNumberInput button:active {
+  background: #f2f4f1 !important;
+  color: var(--forest) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.stTextArea textarea:focus,
+.stTextInput input:focus,
+.stNumberInput input:focus {
+  border-color: var(--leaf) !important;
+  box-shadow: 0 0 0 3px rgba(47, 122, 79, 0.12) !important;
+}
+
+div[data-baseweb="select"] > div {
+  border-color: #dce9df !important;
+  background: rgba(255,255,255,0.92) !important;
+}
+
+.stSlider [data-baseweb="slider"] {
+  padding-top: 0.45rem;
+}
+
+/* Buttons */
+.stButton > button,
+.stDownloadButton > button {
+  border-radius: 14px !important;
+  border: 1px solid rgba(18, 63, 44, 0.08) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em !important;
+  transition: all 0.2s ease !important;
+}
+
+.stButton > button {
+  background: linear-gradient(135deg, var(--forest) 0%, #17633f 100%) !important;
+  color: #fffdf6 !important;
+  min-height: 3.55rem;
+  box-shadow: 0 18px 36px rgba(18, 63, 44, 0.22);
+}
+
+.stButton > button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 22px 44px rgba(18, 63, 44, 0.28);
+  border-color: rgba(255,255,255,0.14) !important;
+}
+
+.stDownloadButton > button {
+  background: rgba(255,255,255,0.82) !important;
+  color: var(--forest) !important;
+  min-height: 3rem;
+}
+
+.stDownloadButton > button:hover {
+  border-color: rgba(47, 122, 79, 0.35) !important;
+  background: #f8fbf4 !important;
+}
+
+/* Toggle / checkbox polish */
+.stCheckbox label,
+.stToggle label,
+.stRadio label {
+  color: var(--text) !important;
+}
+
+div[data-testid="stMarkdownContainer"] p {
+  margin-bottom: 0.35rem;
+}
+
+/* Meal result cards */
+.results-wrap {
+  margin-top: 1.2rem;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin: 2.2rem 0 1rem;
+}
+
+.meal-card {
+  background: rgba(255,255,255,0.88);
+  border: 1px solid rgba(18, 63, 44, 0.10);
+  border-radius: 24px;
+  box-shadow: var(--soft-shadow);
+  padding: 1rem;
+  min-height: 100%;
+}
+
+.meal-image-fallback {
+  height: 180px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(217,164,65,0.28), transparent 30%),
+    radial-gradient(circle at 80% 30%, rgba(47,122,79,0.20), transparent 24%),
+    linear-gradient(135deg, #eef6ea, #fffaf0);
+  display: grid;
+  place-items: center;
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.meal-card h3 {
+  font-family: 'Playfair Display', serif;
+  color: var(--forest);
+  font-size: 1.28rem;
+  line-height: 1.15;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.meal-card ul {
+  padding-left: 1.1rem;
+  margin: 0.55rem 0 0;
+}
+
+.meal-card li {
+  color: var(--text);
+  margin-bottom: 0.26rem;
+  font-size: 0.9rem;
+}
+
+.meal-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.55rem;
+}
+
+.meal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #f7fbf4;
+  color: var(--forest);
+  border: 1px solid rgba(18, 63, 44, 0.08);
+  border-radius: 999px;
+  padding: 0.34rem 0.62rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.calorie-pill {
+  background: #e8f2e4;
+  color: var(--forest);
+  border-radius: 999px;
+  padding: 0.34rem 0.62rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.muted-small {
+  color: var(--muted) !important;
+  font-size: 0.86rem !important;
+}
+
+.narration-box {
+  background: rgba(237, 246, 239, 0.95);
+  border: 1px solid rgba(18, 63, 44, 0.08);
+  border-radius: 18px;
+  padding: 1rem;
+  margin-bottom: 0.7rem;
+}
+
+.html-expander-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 0.7rem;
+}
+
+/* Expander */
+div[data-testid="stExpander"] {
+  background: rgba(255,255,255,0.65);
+  border: 1px solid rgba(18,63,44,0.10);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(18,63,44,0.05);
+  overflow: hidden;
+}
+
+/* Hide Streamlit default menu/footer, keep deploy button untouched */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+
+/* Reference-aligned layout */
+.stDeployButton,
+[data-testid="stToolbar"],
+[data-testid="stHeader"],
+header {
+  display: none !important;
+}
+
+[data-testid="stSidebar"] {
+  width: 296px !important;
+  min-width: 296px !important;
+  transform: translateX(0) !important;
+  visibility: visible !important;
+  display: block !important;
+  opacity: 1 !important;
+  flex-shrink: 0 !important;
+}
+
+[data-testid="stSidebar"] .block-container {
+  padding: 14px 18px 24px !important;
+}
+
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p:not(.sidebar-title),
+[data-testid="stSidebar"] div:not(.sidebar-logo):not(.sidebar-subtitle) {
+  font-family: 'Inter', sans-serif;
+}
+
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] label p {
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+  font-weight: 500 !important;
+  color: var(--text) !important;
+}
+
+[data-testid="stSidebar"] .stNumberInput input,
+[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
+  min-height: 48px !important;
+  height: 48px !important;
+  font-size: 16px !important;
+}
+
+[data-testid="stSidebar"] .stNumberInput [data-testid="stNumberInputContainer"] {
+  min-height: 48px !important;
+  height: 48px !important;
+}
+
+[data-testid="stSidebar"] .stNumberInput button {
+  width: 42px !important;
+  min-height: 48px !important;
+  height: 48px !important;
+}
+
+[data-testid="stSidebar"] .stCheckbox {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  width: auto !important;
+}
+
+[data-testid="stSidebar"] .stCheckbox label {
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+[data-testid="stSidebar"] .stCheckbox label p {
+  display: none;
+}
+
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  gap: 0.5rem;
+}
+
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+  align-items: center !important;
+  gap: 8px !important;
+  margin: 16px 0 8px;
+}
+
+.st-key-exact_toggle_row,
+.st-key-image_toggle_row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin: 14px 0 8px;
+}
+
+.st-key-exact_toggle_row .sidebar-control-label,
+.st-key-image_toggle_row .sidebar-control-label {
+  margin: 0 !important;
+  line-height: 1.2;
+}
+
+.st-key-exact_toggle_row .stMarkdown,
+.st-key-image_toggle_row .stMarkdown {
+  flex: 1 1 auto;
+  display: flex !important;
+  align-items: center !important;
+  min-height: 24px !important;
+}
+
+.st-key-exact_toggle_row .stMarkdown > div,
+.st-key-image_toggle_row .stMarkdown > div,
+.st-key-exact_toggle_row [data-testid="stMarkdownContainer"],
+.st-key-image_toggle_row [data-testid="stMarkdownContainer"] {
+  display: flex !important;
+  align-items: center !important;
+  min-height: 24px !important;
+  margin: 0 !important;
+}
+
+.st-key-exact_toggle_row .stCheckbox,
+.st-key-image_toggle_row .stCheckbox {
+  flex: 0 0 auto;
+  transform: none;
+}
+
+[data-testid="stSidebar"] .stSlider {
+  margin-top: -4px;
+}
+
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapseButton"] {
+  display: none !important;
+}
+
+.block-container {
+  max-width: 1264px;
+  padding: 2.35rem 2.2rem 3.4rem;
+  position: relative;
+}
+
+.hero-grid {
+  display: block;
+  position: relative;
+  min-height: 137px;
+  margin-bottom: 2rem;
+}
+
+.hero-title {
+  font-size: clamp(2.75rem, 3.25vw, 4.1rem);
+  line-height: 1.04;
+  letter-spacing: -0.018em;
+  max-width: 760px;
+}
+
+.hero-subtitle {
+  max-width: 710px;
+  margin-top: 0.7rem;
+  font-size: 1.03rem;
+}
+
+.food-orb {
+  width: 238px;
+  height: 238px;
+  margin: 0;
+  position: absolute;
+  right: 2.1rem;
+  top: -2.2rem;
+  border: 0;
+  background:
+    radial-gradient(circle at 42% 36%, #8fd462 0 5%, transparent 5.4%),
+    radial-gradient(circle at 53% 31%, #6dbd45 0 5%, transparent 5.4%),
+    radial-gradient(circle at 61% 42%, #f28b2f 0 4.2%, transparent 4.6%),
+    radial-gradient(circle at 35% 54%, #e43d2f 0 4.6%, transparent 5%),
+    radial-gradient(circle at 50% 50%, #ffffff 0 41%, transparent 42%),
+    radial-gradient(circle at 54% 54%, rgba(155, 180, 140, 0.13) 0 73%, transparent 74%);
+  box-shadow: none;
+}
+
+.food-orb:before {
+  content: "🥗";
+  font-size: 6.3rem;
+  filter: drop-shadow(0 18px 18px rgba(18, 63, 44, 0.12));
+}
+
+.food-orb:after {
+  content: "";
+  width: 98px;
+  height: 98px;
+  right: -3.1rem;
+  bottom: -2.15rem;
+  top: auto;
+  border-radius: 999px;
+  background: rgba(127, 157, 136, 0.11);
+}
+
+.planner-card-open,
+.st-key-planner_card {
+  background: rgba(255,255,255,0.82);
+  border: 1px solid rgba(18, 63, 44, 0.11);
+  border-radius: 18px;
+  box-shadow: 0 22px 62px rgba(18, 63, 44, 0.10);
+  padding: 1.5rem 1.5rem 1.25rem;
+  margin-bottom: 0;
+}
+
+.planner-card-open .section-label,
+.st-key-planner_card .section-label {
+  margin-bottom: 0.55rem;
+}
+
+.planner-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 1.35rem -1.5rem 1.15rem;
+}
+
+.cta-panel,
+.st-key-cta_panel {
+  min-height: 390px;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+  justify-content: flex-end;
+  padding-bottom: 1.25rem;
+}
+
+.cta-hint {
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-align: center;
+  margin-top: -0.72rem;
+  position: relative;
+  z-index: 2;
+}
+
+.cta-panel .stButton > button,
+.st-key-cta_panel .stButton > button {
+  min-height: 4.35rem;
+  border-radius: 9px !important;
+  font-family: 'Playfair Display', serif;
+  font-size: 1.08rem;
+  letter-spacing: 0 !important;
+}
+
+.cta-arrow {
+  color: var(--forest);
+  font-size: 2rem;
+  line-height: 1;
+  transform: rotate(-22deg);
+  width: 100%;
+  text-align: center;
+  margin-top: 0.65rem;
+}
+
+.stTextArea textarea {
+  min-height: 108px !important;
+}
+
+.chip {
+  padding: 0.32rem 0.64rem;
+  font-weight: 500;
+}
+
+.chip:after {
+  content: " ×";
+  color: rgba(18, 63, 44, 0.55);
+}
+
+.chip-muted:after {
+  content: "";
+}
+
+.st-key-ingredient_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.8rem;
+}
+
+.st-key-ingredient_chips [data-testid="stHorizontalBlock"] {
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.st-key-ingredient_chips .stButton {
+  width: auto !important;
+}
+
+.st-key-ingredient_chips .stButton > button {
+  min-height: 0;
+  height: 2rem;
+  width: auto;
+  border-radius: 999px !important;
+  padding: 0.28rem 0.68rem !important;
+  background: #e8f2e4 !important;
+  color: var(--forest) !important;
+  border: 1px solid rgba(18, 63, 44, 0.06) !important;
+  box-shadow: none !important;
+  font-size: 0.78rem !important;
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 500 !important;
+}
+
+.st-key-ingredient_chips .stButton > button:hover {
+  background: #dcebd7 !important;
+  border-color: rgba(18, 63, 44, 0.14) !important;
+  transform: none;
+  box-shadow: none !important;
+}
+
+.st-key-ingredient_chips .chip {
+  height: 2rem;
+}
+
+.st-key-ingredient_chips .chip:after {
+  content: "";
+}
+
+.stCheckbox {
+  background: rgba(255,255,255,0.78);
+  border: 1px solid rgba(18, 63, 44, 0.09);
+  border-radius: 8px;
+  padding: 0.58rem 0.76rem;
+}
+
+.stCheckbox label p {
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st-key-narration_controls {
+  margin-top: 0.2rem;
+}
+
+.st-key-narration_controls [data-testid="stHorizontalBlock"] {
+  gap: 0.85rem !important;
+  align-items: flex-end !important;
+}
+
+.st-key-narration_controls [data-testid="column"] {
+  min-width: 0 !important;
+}
+
+.st-key-narration_controls .stCheckbox {
+  width: 126px !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  background: rgba(255,255,255,0.86) !important;
+  border: 1px solid rgba(18, 63, 44, 0.11) !important;
+  border-radius: 8px !important;
+}
+
+.st-key-narration_controls .stCheckbox label {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  align-items: center !important;
+  min-height: 42px !important;
+  height: 42px !important;
+  padding: 0 0.72rem !important;
+  gap: 0.42rem !important;
+}
+
+.st-key-narration_controls [data-testid="stWidgetLabel"] {
+  margin: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.st-key-narration_controls .stCheckbox [data-testid="stWidgetLabel"] p {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: 0.82rem;
+  line-height: 1.1;
+  margin: 0 !important;
+}
+
+.st-key-narration_controls .stSelectbox {
+  transform: none;
+}
+
+.st-key-narration_controls .stSelectbox [data-testid="stWidgetLabel"] {
+  margin-bottom: 0.24rem !important;
+}
+
+.st-key-narration_controls .stSelectbox [data-testid="stWidgetLabel"] p {
+  color: #516056 !important;
+  font-size: 0.74rem !important;
+  font-weight: 500 !important;
+  line-height: 1.05 !important;
+}
+
+.st-key-narration_controls .stSelectbox div[data-baseweb="select"] > div {
+  min-height: 44px !important;
+  height: 44px !important;
+  border-radius: 8px !important;
+  align-items: center !important;
+}
+
+@media (max-width: 1024px) {
+  .st-key-narration_controls [data-testid="stHorizontalBlock"] {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.45rem !important;
+  }
+
+  .st-key-narration_controls [data-testid="stColumn"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  .st-key-narration_controls .stCheckbox {
+    width: 112px !important;
+    min-height: 38px !important;
+    height: 38px !important;
+  }
+
+  .st-key-narration_controls .stCheckbox label {
+    min-height: 36px !important;
+    height: 36px !important;
+    padding: 0 0.6rem !important;
+    gap: 0.34rem !important;
+  }
+
+  .st-key-narration_controls .stCheckbox [data-testid="stWidgetLabel"] p {
+    font-size: 0.75rem !important;
+  }
+
+  .st-key-narration_controls .stSelectbox {
+    width: 100% !important;
+  }
+
+  .st-key-narration_controls .stSelectbox {
+    transform: none;
+  }
+}
+
+.result-band {
+  margin: 3.1rem -2.2rem -3.4rem;
+  padding: 1.6rem 2.2rem 1.45rem;
+  background: rgba(255,255,255,0.62);
+  border-top: 1px solid rgba(18, 63, 44, 0.06);
+}
+
+.result-header {
+  margin: 0 0 1.15rem;
+  align-items: center;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.8rem;
+  padding-top: 0.7rem;
+}
+
+.section-title {
+  font-size: 1.95rem;
+}
+
+.result-title {
+  font-family: 'Playfair Display', serif;
+  color: var(--forest);
+  font-size: 2rem;
+  line-height: 1.05;
+  margin: 0 0 0.42rem;
+}
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  color: #1f2d26;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.st-key-result_actions {
+  padding-top: 0.7rem;
+}
+
+.st-key-download_plan_top button,
+.st-key-download_plan_top .stDownloadButton > button {
+  min-height: 3.25rem !important;
+  width: 100% !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,0.90) !important;
+  color: #1f2d26 !important;
+  border: 1px solid rgba(18, 63, 44, 0.12) !important;
+  box-shadow: 0 8px 20px rgba(18, 63, 44, 0.06) !important;
+  font-size: 0.92rem !important;
+  font-weight: 800 !important;
+}
+
+.st-key-download_plan_top button:hover,
+.st-key-download_plan_top .stDownloadButton > button:hover {
+  transform: none !important;
+  background: #fbfdf8 !important;
+  border-color: rgba(18, 63, 44, 0.18) !important;
+  box-shadow: 0 10px 24px rgba(18, 63, 44, 0.08) !important;
+}
+
+.target-meal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.2rem;
+  margin-top: 1.05rem;
+}
+
+.target-meal-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 690px;
+  height: 690px;
+  padding: 1.22rem;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(18, 63, 44, 0.10);
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(18, 63, 44, 0.08);
+}
+
+.target-meal-card-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+[class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]) {
+  min-height: 690px;
+  height: 690px;
+  padding: 1.22rem;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(18, 63, 44, 0.10);
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(18, 63, 44, 0.08);
+}
+
+[class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]) [data-testid="stVerticalBlock"] {
+  height: 100%;
+}
+
+[class*="st-key-meal_card_actions_"] {
+  margin-top: auto;
+  padding: 0.85rem 0 0;
+  min-height: 0 !important;
+  height: auto !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-top: 1px dashed rgba(18, 63, 44, 0.12) !important;
+  box-shadow: none !important;
+}
+
+[class*="st-key-meal_card_actions_"] [data-testid="stVerticalBlock"] {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+[class*="st-key-meal_card_actions_"] audio {
+  width: 100%;
+  max-width: 100%;
+}
+
+[class*="st-key-meal_card_actions_"] .stAudio {
+  margin-bottom: 0.55rem;
+}
+
+[class*="st-key-meal_card_actions_"] .stDownloadButton > button {
+  width: 100%;
+  min-height: 2.9rem !important;
+  border-radius: 10px !important;
+  background: #f0f5ec !important;
+  color: var(--forest) !important;
+  border: 1px solid rgba(18, 63, 44, 0.06) !important;
+  box-shadow: none !important;
+  font-size: 0.98rem !important;
+  font-weight: 800 !important;
+}
+
+[class*="st-key-meal_card_actions_"] .stDownloadButton > button:hover {
+  background: #e8f2e4 !important;
+  border-color: rgba(18, 63, 44, 0.10) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+[class*="st-key-meal_audio_player_"] {
+  margin-bottom: 0.8rem;
+}
+
+[class*="st-key-meal_audio_player_"] audio {
+  width: 100%;
+  max-width: 100%;
+}
+
+.target-meal-card-layout + [class*="st-key-meal_card_actions_"] {
+  margin-top: 0.75rem;
+}
+
+.target-meal-label {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.34rem 0.88rem 0.34rem 0.5rem;
+  border-radius: 999px;
+  background: #e9f2e4;
+  color: var(--forest);
+  font-size: 0.86rem;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.target-meal-label-icon {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.86);
+  box-shadow: 0 4px 12px rgba(18, 63, 44, 0.06);
+  font-size: 1.18rem;
+}
+
+.target-meal-title {
+  color: var(--forest);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.68rem;
+  line-height: 1.16;
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.target-meal-calories {
+  align-self: flex-start;
+  margin: -0.1rem 0 0.34rem;
+}
+
+.target-meal-visual {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.58rem;
+}
+
+.target-meal-media {
+  width: 100%;
+  height: 270px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #eef6ea, #fff8ed);
+  position: relative;
+}
+
+.target-meal-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.target-meal-fallback {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 4rem;
+}
+
+.target-meal-icon {
+  display: none;
+}
+
+.target-meal-content {
+  min-width: 0;
+  padding: 0.25rem 0 0;
+  flex: 1 1 auto;
+}
+
+.target-meal-content ul {
+  margin: 0;
+  padding-left: 1rem;
+  columns: 2;
+  column-gap: 1.9rem;
+}
+
+.target-meal-content li {
+  break-inside: avoid;
+  margin-bottom: 0.58rem;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  color: #26332b;
+}
+
+.target-meal-actions {
+  grid-column: 1 / -1;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: auto;
+  padding: 0.15rem 0.55rem 0.05rem;
+  min-width: 0;
+}
+
+.meal-audio {
+  width: 100%;
+  height: 2.35rem;
+  max-width: 100%;
+  display: block;
+  border-radius: 8px;
+}
+
+.download-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #f0f5ec;
+  color: var(--forest);
+  font-size: 0.73rem;
+  font-weight: 700;
+  padding: 0.55rem 0.7rem;
+  white-space: nowrap;
+  text-decoration: none;
+  text-align: center;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audio-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 4.25rem;
+  padding: 0.92rem 1.05rem;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #f3f8ef 0%, #fffdf6 100%);
+  color: #2c5c3d;
+  font-size: 0.98rem;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.audio-empty-icon {
+  color: #60b246;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.html-tools {
+  margin-top: 1.35rem;
+}
+
+@media (max-width: 700px) {
+  html,
+  body,
+  .stApp,
+  [data-testid="stAppViewContainer"] {
+    position: relative !important;
+    display: block !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    overflow: visible !important;
+  }
+
+  [data-testid="stSidebar"] {
+    position: relative !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: auto !important;
+    transform: translateX(0) !important;
+    border-right: 0;
+    border-bottom: 1px solid rgba(18, 63, 44, 0.08);
+  }
+
+  [data-testid="stSidebar"] .block-container {
+    padding: 28px 18px 24px !important;
+    max-width: 365px;
+    margin: 0 auto;
+  }
+
+  [data-testid="stSidebarContent"] {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  [data-testid="stSidebarUserContent"] {
+    max-width: 365px !important;
+    margin: 0 !important;
+  }
+
+  section[data-testid="stSidebar"] + section,
+  [data-testid="stMain"] {
+    position: relative !important;
+    inset: auto !important;
+    margin-left: 0 !important;
+    top: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .food-orb {
+    width: 150px;
+    height: 150px;
+    margin-left: 0;
+  }
+
+  .food-orb:before {
+    font-size: 4rem;
+  }
+
+  .form-topline,
+  .result-header {
+    display: block;
+  }
+
+  .hero-title {
+    font-size: 2.55rem;
+  }
+
+  .target-meal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .target-meal-card {
+    min-height: 650px;
+    height: 650px;
+  }
+
+  .target-meal-card-layout {
+    gap: 0.72rem;
+  }
+
+  [class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]) {
+    min-height: 650px;
+    height: 650px;
+  }
+
+  .target-meal-title {
+    font-size: 1.48rem;
+  }
+
+  .target-meal-media {
+    height: 230px;
+  }
+
+  .target-meal-content ul {
+    columns: 1;
+  }
+
+  .meal-audio,
+  .download-pill {
+    width: 100%;
+  }
+
+  .result-band {
+    margin-left: -1rem;
+    margin-right: -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+if HERO_BG_URI:
+    st.markdown(
+        f"""
+<style>
+.block-container {{
+  background:
+    url("{HERO_BG_URI}") top right / min(100%, 1160px) auto no-repeat,
+    linear-gradient(180deg, rgba(252, 251, 244, 0.92) 0%, rgba(250, 250, 242, 0.86) 38%, rgba(247, 250, 244, 0.0) 72%) !important;
+}}
+
+.food-orb {{
+  display: none !important;
+}}
+
+.food-orb::before,
+.food-orb::after {{
+  content: "" !important;
+  display: none !important;
+}}
+
+.hero-copy {{
+  position: relative;
+  z-index: 1 !important;
+  max-width: 760px;
+}}
+
+@media (min-width: 701px) and (max-width: 1100px) {{
+  .block-container {{
+    background:
+      url("{HERO_BG_URI}") top right / 940px auto no-repeat,
+      linear-gradient(180deg, rgba(252, 251, 244, 0.92) 0%, rgba(250, 250, 242, 0.84) 38%, rgba(247, 250, 244, 0.0) 72%) !important;
+  }}
+
+  .hero-title,
+  .hero-subtitle {{
+    max-width: calc(100% - 270px) !important;
+  }}
+}}
+
+@media (max-width: 700px) {{
+  .block-container {{
+    background: none !important;
+  }}
+
+  .food-orb {{
+    display: none !important;
+  }}
+}}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Secrets / API key
+# -----------------------------------------------------------------------------
+
+if "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+
+
+# -----------------------------------------------------------------------------
+# Sidebar
+# -----------------------------------------------------------------------------
+
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="sidebar-brand">
+          <div class="sidebar-logo">🪴</div>
+          <div>
+            <p class="sidebar-title">Daily Meal Planner</p>
+            <div class="sidebar-subtitle">AI-powered meal planning</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="sidebar-section-label">⚙ Settings</div>', unsafe_allow_html=True)
+
+    kcal = st.number_input(
+        "Daily calorie target (kcal)",
+        min_value=800,
+        max_value=5000,
+        value=2000,
+        step=50,
+    )
+
+    with st.container(key="exact_toggle_row", horizontal=True, horizontal_alignment="left", vertical_alignment="center", gap="small"):
+        st.markdown(
+            '<div class="sidebar-control-label">Use ONLY listed ingredients</div>',
+            unsafe_allow_html=True,
+        )
+        exact_ingredients = st.toggle(
+            "Use ONLY listed ingredients",
+            value=False,
+            label_visibility="collapsed",
+        )
+
+    model_choice = st.selectbox(
+        "Chat model",
+        ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
+        index=2,
+    )
+
+    temperature = 1.0
+
+    with st.container(key="image_toggle_row", horizontal=True, horizontal_alignment="left", vertical_alignment="center", gap="small"):
+        st.markdown(
+            '<div class="sidebar-control-label">Generate dish images</div>',
+            unsafe_allow_html=True,
+        )
+        generate_images = st.toggle(
+            "Generate dish images",
+            value=True,
+            label_visibility="collapsed",
+        )
+
+    st.markdown(
+        f"""
+        <div class="tip-card">
+          <div class="tip-row">
+            <div class="tip-icon">🌿</div>
+            <div><strong>Tip:</strong> The more specific your ingredients and notes are,
+            the better your meal plan will be.</div>
+          </div>
+          <div class="kcal-card">
+            <strong>🔥 {kcal} kcal target</strong><br>
+            Balanced • Nutritious • Delicious
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Hero
+# -----------------------------------------------------------------------------
+
+st.markdown(
+    """
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">✨ AI Meal Planner</p>
+        <h1 class="hero-title">Plan a full day of meals in seconds.</h1>
+        <p class="hero-subtitle">
+          Get personalized breakfast, lunch, and dinner ideas using the ingredients you love.
+        </p>
+      </div>
+      <div class="food-orb"></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# -----------------------------------------------------------------------------
+# Main input form
+# -----------------------------------------------------------------------------
+
+input_col, cta_col = st.columns([4.3, 1.25], gap="large")
+default_ingredients = (
+    "extra-virgin olive oil, whole grains, fresh fruits and vegetables, "
+    "nuts and seeds, fish, eggs, fermented foods, honey"
+)
+
+if "ingredients_input" not in st.session_state:
+    st.session_state["ingredients_input"] = default_ingredients
+
+with input_col:
+    with st.container(key="planner_card"):
+        form_col_left, form_col_right = st.columns([1.75, 1], gap="large")
+
+        with form_col_left:
+            st.markdown('<div class="section-label">🌿 Base Ingredients</div>', unsafe_allow_html=True)
+            ingredients = st.text_area(
+                label="Ingredients",
+                label_visibility="collapsed",
+                key="ingredients_input",
+                height=118,
+                placeholder="e.g. chicken, broccoli, quinoa, lemon, garlic ...",
+            )
+
+            ingredient_items = parse_ingredients(ingredients)
+            visible_ingredients = ingredient_items[:5]
+            hidden_ingredients = max(len(ingredient_items) - len(visible_ingredients), 0)
+
+            if ingredient_items:
+                with st.container(key="ingredient_chips", horizontal=True, gap="small"):
+                    for index, ingredient in enumerate(visible_ingredients):
+                        safe_key_part = "".join(
+                            char if char.isalnum() else "_"
+                            for char in ingredient.lower()
+                        )
+                        st.button(
+                            f"{ingredient} ×",
+                            key=f"remove_ingredient_{index}_{safe_key_part}",
+                            on_click=remove_ingredient_chip,
+                            args=(ingredient,),
+                        )
+                    if hidden_ingredients:
+                        st.markdown(
+                            f'<span class="chip chip-muted">+{hidden_ingredients} more</span>',
+                            unsafe_allow_html=True,
+                        )
+
+        with form_col_right:
+            st.markdown(
+                '<div class="section-label">🧾 Extra Notes <span class="optional">(optional)</span></div>',
+                unsafe_allow_html=True,
+            )
+            extra = st.text_input(
+                label="Extra notes",
+                label_visibility="collapsed",
+                placeholder="e.g. spicy, low-carb, no sugar ...",
+            )
+
+            st.markdown(
+                '<div class="section-label" style="margin-top:1.18rem;">🛡️ Dietary Restriction <span class="optional">(optional)</span></div>',
+                unsafe_allow_html=True,
+            )
+            diet = st.text_input(
+                label="Dietary restriction",
+                label_visibility="collapsed",
+                placeholder="e.g. vegan, gluten-free, dairy-free ...",
+            )
+
+        # ---------------------------------------------------------------------
+        # Narration options
+        # ---------------------------------------------------------------------
+
+        st.markdown('<div class="planner-divider"></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-label">🔊 Audio Narration <span class="optional">— select meals to narrate</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        with st.container(key="narration_controls"):
+            narration_cols = st.columns([0.95, 0.95, 0.95, 1.28, 1.28], gap="small")
+
+            with narration_cols[0]:
+                narrate_breakfast = st.checkbox("🌅 Breakfast", value=True)
+            with narration_cols[1]:
+                narrate_lunch = st.checkbox("☀️ Lunch", value=True)
+            with narration_cols[2]:
+                narrate_dinner = st.checkbox("🌙 Dinner", value=True)
+
+            any_narration = narrate_breakfast or narrate_lunch or narrate_dinner
+
+            with narration_cols[3]:
+                if any_narration:
+                    tts_voice = st.selectbox(
+                        "Voice",
+                        ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+                        index=0,
+                    )
+                else:
+                    tts_voice = "alloy"
+                    st.selectbox(
+                        "Voice",
+                        ["alloy"],
+                        index=0,
+                        disabled=True,
+                    )
+
+            with narration_cols[4]:
+                if any_narration:
+                    tts_quality = st.selectbox(
+                        "Quality",
+                        ["tts-1", "tts-1-hd"],
+                        index=0,
+                        format_func=lambda value: {
+                            "tts-1": "Standard",
+                            "tts-1-hd": "High",
+                        }.get(value, value),
+                    )
+                else:
+                    tts_quality = "tts-1"
+                    st.selectbox(
+                        "Quality",
+                        ["tts-1"],
+                        index=0,
+                        disabled=True,
+                        format_func=lambda value: "Standard",
+                    )
+
+with cta_col:
+    with st.container(key="cta_panel"):
+        generate_btn = st.button("✨ Generate Meal Plan", use_container_width=True)
+        st.markdown('<div class="cta-hint">It only takes a few seconds</div><div class="cta-arrow">↗</div>', unsafe_allow_html=True)
+
+
+narrate_keys: list[str] = []
+if narrate_breakfast:
+    narrate_keys.append("breakfast")
+if narrate_lunch:
+    narrate_keys.append("lunch")
+if narrate_dinner:
+    narrate_keys.append("dinner")
+
+
+# -----------------------------------------------------------------------------
+# Generation
+# -----------------------------------------------------------------------------
 
 if generate_btn:
     if not os.environ.get("OPENAI_API_KEY"):
         st.error("Please add your OpenAI API Key under Settings → Secrets.")
         st.stop()
+
     if not ingredients.strip():
         st.warning("Please enter at least one ingredient.")
         st.stop()
 
-    with st.spinner("Crafting your meal plan…"):
+    with st.spinner("Crafting your personalized meal plan…"):
         try:
             html_output, titles, meals = generate_meal_plan(
                 ingredients=ingredients,
                 kcal=kcal,
                 exact_ingredients=exact_ingredients,
-                extra=extra or None,
-                diet=diet or None,
+                extra=extra.strip() or None,
+                diet=diet.strip() or None,
                 model=model_choice,
                 temperature=temperature,
             )
+
             st.session_state["html_output"] = html_output
-            st.session_state["titles"]      = titles
-            st.session_state["meals"]       = meals
-            st.session_state["images"]      = {}
-            st.session_state["narrations"]  = {}
+            st.session_state["titles"] = titles
+            st.session_state["meals"] = meals
+            st.session_state["images"] = {}
+            st.session_state["narrations"] = {}
+
         except Exception as exc:
             st.error(f"Error generating meal plan: {exc}")
             st.stop()
 
-    # ── TTS runs immediately after, still inside the same "wait" ──────────
     if narrate_keys:
-        meal_labels = {"breakfast": "🌅 Breakfast", "lunch": "☀️ Lunch", "dinner": "🌙 Dinner"}
         for key in narrate_keys:
             meal_data = st.session_state["meals"].get(key, {})
-            script    = meal_data.get("narration", "")
-            label     = meal_labels[key]
+            script = get_meal_value(meal_data, ["narration", "script", "audio_script"], "")
+            label = f"{meal_icon(key)} {meal_label(key)}"
+
             if not script:
                 st.warning(f"No narration script returned for {label}.")
                 continue
+
             with st.spinner(f"Generating {label} audio…"):
                 try:
                     audio_bytes = speak_narration(
@@ -189,92 +2025,154 @@ if generate_btn:
                         voice=tts_voice,
                         model=tts_quality,
                     )
+
                     if audio_bytes:
                         st.session_state["narrations"][key] = audio_bytes
                     else:
                         st.warning(f"No audio returned for {label}.")
+
                 except Exception as exc:
                     st.error(f"Audio error for {label}: {exc}")
 
-# ---------------------------------------------------------------------------
-# Display results
-# ---------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Results
+# -----------------------------------------------------------------------------
 
 if "html_output" in st.session_state:
     html_output = st.session_state["html_output"]
-    titles      = st.session_state["titles"]
-    meals       = st.session_state.get("meals", {})
+    titles = st.session_state.get("titles", [])
+    meals = st.session_state.get("meals", {})
 
     st.session_state.setdefault("images", {})
     st.session_state.setdefault("narrations", {})
 
-    st.divider()
-    st.markdown("## 🍽️ Your Meal Plan")
+    keys = meal_keys_from_data(meals)
 
-    if titles:
-        tags_html = "".join(f'<span class="tag">{t}</span>' for t in titles)
-        st.markdown(tags_html, unsafe_allow_html=True)
-        st.markdown("<br/>", unsafe_allow_html=True)
+    header_col, action_col = st.columns([1.7, 0.45], gap="large")
 
-    with st.expander("📄 Full meal plan (rendered HTML)", expanded=True):
-        st.components.v1.html(html_output, height=900, scrolling=True)
+    with header_col:
+        st.markdown(
+            f"""
+            <div class="result-header">
+              <div>
+                <h2 class="result-title">✨ Your Personalized Meal Plan</h2>
+                <div class="result-summary">
+                  <span>{len(keys) or 3} meals • ~{escape(kcal)} kcal</span>
+                  <span class="tag">Balanced & Nutritious</span>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    st.download_button(label="⬇️ Download meal plan as HTML",
-        data=html_output, file_name="daily_meal_plan.html", mime="text/html")
-
-    # ---------------------------------------------------------------------------
-    # Image generation
-    # ---------------------------------------------------------------------------
-
-    if generate_images and titles:
-        st.divider()
-        st.markdown("## 📸 Dish Images")
-        if not os.environ.get("OPENAI_API_KEY"):
-            st.warning("Add your API key in Streamlit Secrets to generate images.")
-        else:
-            img_cols = st.columns(len(titles))
-            with tempfile.TemporaryDirectory() as tmpdir:
-                for col, title in zip(img_cols, titles):
-                    cached = st.session_state["images"].get(title)
-                    if cached:
-                        col.image(cached, caption=title, use_container_width=True)
-                        continue
-                    with col:
-                        with st.spinner(f"Generating image for '{title}'…"):
-                            try:
-                                img_bytes = generate_meal_image(title=title, save_dir=tmpdir,
-                                    extra="white background, food photography, top-down")
-                                if img_bytes:
-                                    st.session_state["images"][title] = img_bytes
-                                    st.image(img_bytes, caption=title, use_container_width=True)
-                                else:
-                                    st.warning(f"No image returned for '{title}'.")
-                            except Exception as exc:
-                                st.error(f"Image error: {exc}")
-
-    # ---------------------------------------------------------------------------
-    # Audio narration results — shown only for meals that were generated
-    # ---------------------------------------------------------------------------
-
-    narrations = st.session_state["narrations"]
-    if narrations:
-        st.divider()
-        st.markdown("## 🔊 Audio Narration")
-        meal_labels = {"breakfast": "🌅 Breakfast", "lunch": "☀️ Lunch", "dinner": "🌙 Dinner"}
-
-        for key, label in meal_labels.items():
-            audio = narrations.get(key)
-            if not audio:
-                continue
-            meal_title = meals.get(key, {}).get("title", label)
-            st.markdown(f'<div class="narration-box"><strong>{label} — {meal_title}</strong></div>',
-                unsafe_allow_html=True)
-            st.audio(audio, format="audio/mp3")
+    with action_col:
+        with st.container(key="result_actions"):
             st.download_button(
-                label=f"⬇️ Download {label} narration (MP3)",
-                data=audio,
-                file_name=f"{key}_narration.mp3",
-                mime="audio/mp3",
-                key=f"dl_{key}",
+                label="⬇ Download Plan",
+                data=html_output,
+                file_name="daily_meal_plan.html",
+                mime="text/html",
+                use_container_width=True,
+                key="download_plan_top",
             )
-            st.markdown("---")
+
+    if not keys:
+        st.warning("The meal plan was generated, but no meal card data was returned. Open the full HTML plan below.")
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meal_columns = st.columns(3, gap="medium")
+            for index, key in enumerate(keys):
+                with meal_columns[index % 3]:
+                    meal = meals.get(key, {})
+                    if not isinstance(meal, dict):
+                        meal = {"details": meal}
+
+                    title = get_meal_title(key, meal, titles)
+                    calories = get_meal_calories(meal)
+                    ingredients_list = as_list(
+                        get_meal_value(
+                            meal,
+                            ["ingredients", "ingredient_list", "items"],
+                            "",
+                        )
+                    )
+
+                    cached_image = st.session_state["images"].get(title)
+
+                    if generate_images and not cached_image:
+                        if not os.environ.get("OPENAI_API_KEY"):
+                            st.warning("Add your API key in Streamlit Secrets to generate images.")
+                        else:
+                            with st.spinner(f"Generating image for {title}..."):
+                                try:
+                                    img_bytes = generate_meal_image(
+                                        title=title,
+                                        save_dir=tmpdir,
+                                        extra=(
+                                            "modern healthy food photography, top-down, "
+                                            "natural light, white ceramic plate, clean cream background"
+                                        ),
+                                    )
+                                    if img_bytes:
+                                        st.session_state["images"][title] = img_bytes
+                                        cached_image = img_bytes
+                                except Exception as exc:
+                                    st.error(f"Image error for {title}: {exc}")
+
+                    image_uri = image_data_uri(cached_image)
+                    image_html = (
+                        f'<img src="{image_uri}" alt="{escape(title)}">'
+                        if image_uri
+                        else f'<div class="target-meal-fallback">{meal_icon(key)}</div>'
+                    )
+                    calories_html = f'<span class="calorie-pill">{escape(calories)}</span>' if calories else ""
+                    audio = st.session_state["narrations"].get(key)
+
+                    with st.container(key=f"meal_card_{key}_{index}"):
+                        st.html(
+                            '<div class="target-meal-card-layout">'
+                            '<div class="target-meal-label">'
+                            f'<span class="target-meal-label-icon">{meal_icon(key)}</span>'
+                            f'<span>{escape(meal_label(key))}</span>'
+                            '</div>'
+                            f'<h3 class="target-meal-title">{escape(title)}</h3>'
+                            f'<div class="target-meal-calories">{calories_html}</div>'
+                            '<div class="target-meal-media">'
+                            f'{image_html}'
+                            '</div>'
+                            '<div class="target-meal-content">'
+                            f'{render_compact_bullets(ingredients_list, max_items=5)}'
+                            '</div>'
+                            '</div>'
+                        )
+
+                        if audio:
+                            with st.container(key=f"meal_card_actions_{key}_{index}"):
+                                with st.container(key=f"meal_audio_player_{key}_{index}"):
+                                    st.audio(audio, format="audio/mp3")
+                                st.download_button(
+                                    label="⬇ Download MP3",
+                                    data=audio,
+                                    file_name=f"{key}_narration.mp3",
+                                    mime="audio/mp3",
+                                    key=f"download_audio_card_{key}_{index}",
+                                    use_container_width=True,
+                                )
+                        else:
+                            with st.container(key=f"meal_card_actions_{key}_{index}"):
+                                st.html(
+                                    '<div class="audio-empty">'
+                                    '<span class="audio-empty-icon">🌿</span>'
+                                    '<span>Audio narration not selected<br>for this meal.</span>'
+                                    '</div>'
+                                )
+
+    st.markdown(
+        '<p class="html-expander-note">Need the original generated HTML? Open the full rendered plan below.</p>',
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("📄 Full meal plan — rendered HTML", expanded=False):
+        st.components.v1.html(html_output, height=900, scrolling=True)
