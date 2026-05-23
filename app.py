@@ -16,7 +16,7 @@ from meal_logic import generate_meal_image, generate_meal_plan, speak_narration
 from ui.meal_form import render_hero, render_meal_form
 from ui.results import render_results
 from ui.sidebar import render_sidebar
-from utils.formatting import get_meal_value, load_css, local_image_data_uri, meal_icon, meal_label
+from utils.formatting import build_meal_narration_script, load_css, local_image_data_uri, meal_icon, meal_label
 
 
 st.set_page_config(
@@ -148,11 +148,11 @@ def generate_narrations(narrate_keys: list[str], tts_voice: str, tts_quality: st
 
     for key in narrate_keys:
         meal_data = st.session_state["meals"].get(key, {})
-        script = get_meal_value(meal_data, ["narration", "script", "audio_script"], "")
+        script = build_meal_narration_script(key, meal_data)
         label = f"{meal_icon(key)} {meal_label(key)}"
 
         if not script:
-            st.warning(f"No narration script returned for {label}.")
+            st.warning(f"No recipe steps returned for {label}.")
             continue
 
         with st.spinner(f"Generating {label} audio…"):

@@ -113,6 +113,30 @@ def render_compact_bullets(items: list[str], max_items: int = 5) -> str:
     return "<ul>" + "".join(f"<li>{escape(item)}</li>" for item in shown) + "</ul>"
 
 
+def build_meal_narration_script(key: str, meal: dict[str, Any]) -> str:
+    """Build a complete spoken recipe script from structured meal data."""
+    title = safe_text(get_meal_value(meal, ["title", "name", "meal_title"], meal_label(key)))
+    calories = get_meal_calories(meal)
+    ingredients = as_list(get_meal_value(meal, ["ingredients", "ingredient_list", "items"], ""))
+    instructions = as_list(get_meal_value(meal, ["instructions", "steps", "method", "directions"], ""))
+
+    lines = [f"Here is how to prepare {title} for {meal_label(key).lower()}."]
+
+    if calories:
+        lines.append(f"This meal is approximately {calories}.")
+
+    if ingredients:
+        lines.append("You will need:")
+        lines.extend(f"{index}. {ingredient}." for index, ingredient in enumerate(ingredients, start=1))
+
+    if instructions:
+        lines.append("Now, here are the preparation steps:")
+        lines.extend(f"Step {index}. {step}" for index, step in enumerate(instructions, start=1))
+
+    lines.append("Enjoy your meal.")
+    return "\n".join(lines)
+
+
 def meal_icon(key: str) -> str:
     """Return the display icon for a meal key."""
     return {

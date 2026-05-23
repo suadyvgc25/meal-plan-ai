@@ -34,8 +34,7 @@ def generate_meal_plan(
     -------
     html : str          Full HTML meal plan ready to render.
     titles : list[str]  ["Breakfast title", "Lunch title", "Dinner title"]
-    meals : dict        {"breakfast": {title, ingredients, instructions, narration}, ...}
-                        narration is a ready-made spoken script — no extra GPT call needed.
+    meals : dict        {"breakfast": {title, calories, ingredients, instructions}, ...}
     """
     client = _get_client()
 
@@ -88,21 +87,21 @@ Return ONLY valid JSON in this exact format:
   "meals": {{
     "breakfast": {{
       "title": "Breakfast recipe title",
-      "ingredients": ["Ingredient 1 with exact amount", "Ingredient 2 with exact amount"],
-      "instructions": ["Step 1", "Step 2", "Step 3"],
-      "narration": "A natural spoken version of the breakfast recipe, including the ingredients and all cooking steps. Do not use placeholder text."
+      "calories": "520 kcal",
+      "ingredients": ["Ingredient 1", "Ingredient 2"],
+      "instructions": ["Step 1", "Step 2", "Step 3"]
     }},
     "lunch": {{
       "title": "Lunch recipe title",
-      "ingredients": ["Ingredient 1 with exact amount", "Ingredient 2 with exact amount"],
-      "instructions": ["Step 1", "Step 2", "Step 3"],
-      "narration": "A natural spoken version of the lunch recipe, including the ingredients and all cooking steps. Do not use placeholder text."
+      "calories": "680 kcal",
+      "ingredients": ["Ingredient 1", "Ingredient 2"],
+      "instructions": ["Step 1", "Step 2", "Step 3"]
     }},
     "dinner": {{
       "title": "Dinner recipe title",
-      "ingredients": ["Ingredient 1 with exact amount", "Ingredient 2 with exact amount"],
-      "instructions": ["Step 1", "Step 2", "Step 3"],
-      "narration": "A natural spoken version of the dinner recipe, including the ingredients and all cooking steps. Do not use placeholder text."
+      "calories": "630 kcal",
+      "ingredients": ["Ingredient 1", "Ingredient 2"],
+      "instructions": ["Step 1", "Step 2", "Step 3"]
     }}
   }}
 }}
@@ -113,7 +112,6 @@ Do not include explanations outside the JSON.
 The "html" field must contain the COMPLETE, FULLY RENDERED HTML meal plan with all three meals.
 Do NOT use placeholder text like "HTML meal plan goes here" or "Full recipe here" anywhere.
 The "instructions" arrays must contain the actual step-by-step cooking instructions — not placeholders.
-The "narration" fields must contain the actual spoken recipe script — not placeholders.
 Write everything out in full. The JSON will be large — that is expected and required.
 """
 
@@ -193,8 +191,8 @@ def speak_narration(
     """
     Convert a narration script to MP3 audio using OpenAI TTS.
 
-    The script comes directly from meals["breakfast"]["narration"] returned
-    by generate_meal_plan() — no extra GPT call needed here, just TTS.
+    The app builds this script from the structured meal title, ingredients,
+    and instructions before calling this function.
 
     Parameters
     ----------

@@ -97,10 +97,9 @@ This separation keeps the AI/business logic easier to understand and easier to r
    - Full rendered HTML
    - Recipe titles
    - Structured meal data for breakfast, lunch, and dinner
-   - Narration scripts for each meal
 4. The app parses the structured response and stores the result in Streamlit session state.
 5. If image generation is enabled, the app generates a food image for each meal.
-6. If narration is selected, the app converts the narration script into MP3 audio.
+6. If narration is selected, the app builds a spoken recipe script from each meal's title, ingredients, and instructions, then converts it into MP3 audio.
 7. The UI renders the final result as custom meal cards with images, calories, ingredients, audio controls, and downloads.
 
 ## Setup
