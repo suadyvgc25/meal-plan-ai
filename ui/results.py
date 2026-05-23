@@ -45,7 +45,7 @@ def render_results(kcal: int, generate_images: bool, generate_meal_image: ImageG
             f"""
             <div class="result-header">
               <div>
-                <h2 class="result-title">✨ Your Personalized Meal Plan</h2>
+                <h4 class="result-title">✨ Your Personalized Meal Plan ✨</h4>
                 <div class="result-summary">
                   <span>{len(keys) or 3} meals • ~{escape(kcal)} kcal</span>
                   <span class="tag">Balanced & Nutritious</span>

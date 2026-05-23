@@ -1420,6 +1420,30 @@ header {
     columns: 1;
   }
 
+  .st-key-cta_panel {
+    min-height: auto;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 0.75rem 0 0;
+    margin-top: 0;
+  }
+
+  .st-key-cta_panel .stButton > button {
+    min-height: 3.75rem;
+  }
+
+  .cta-hint {
+    margin: 0.35rem 0 1.9rem;
+  }
+
+  .cta-arrow {
+    display: none;
+  }
+
+  .result-header {
+    margin-top: 1.2rem;
+  }
+
   .meal-audio,
   .download-pill {
     width: 100%;
