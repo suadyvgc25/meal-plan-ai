@@ -45,7 +45,7 @@ def render_results(kcal: int, generate_images: bool, generate_meal_image: ImageG
             f"""
             <div class="result-header">
               <div>
-                <h4 class="result-title">✨ Your Personalized Meal Plan ✨</h4>
+                <h4 class="result-title">✨ Your Personalized Meal Plan</h4>
                 <div class="result-summary">
                   <span>{len(keys) or 3} meals • ~{escape(kcal)} kcal</span>
                   <span class="tag">Balanced & Nutritious</span>
@@ -68,7 +68,7 @@ def render_results(kcal: int, generate_images: bool, generate_meal_image: ImageG
             )
 
     if not keys:
-        st.warning("The meal plan was generated, but no meal card data was returned. Open the full HTML plan below.")
+        st.warning("The meal plan was generated, but no meal card data was returned. Open the generated HTML plan below.")
     else:
         _render_meal_cards(
             keys=keys,
@@ -79,11 +79,11 @@ def render_results(kcal: int, generate_images: bool, generate_meal_image: ImageG
         )
 
     st.markdown(
-        '<p class="html-expander-note">Need the original generated HTML? Open the full rendered plan below.</p>',
+        '<p class="html-expander-note">Need a printable HTML version? Open the generated plan below.</p>',
         unsafe_allow_html=True,
     )
 
-    with st.expander("📄 Full meal plan — rendered HTML", expanded=False):
+    with st.expander("📄 Full meal plan — generated HTML", expanded=False):
         st.components.v1.html(html_output, height=900, scrolling=True)
 
 

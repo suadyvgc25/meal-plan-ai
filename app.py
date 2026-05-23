@@ -16,7 +16,14 @@ from meal_logic import generate_meal_image, generate_meal_plan, speak_narration
 from ui.meal_form import render_hero, render_meal_form
 from ui.results import render_results
 from ui.sidebar import render_sidebar
-from utils.formatting import build_meal_narration_script, load_css, local_image_data_uri, meal_icon, meal_label
+from utils.formatting import (
+    build_downloadable_meal_plan_html,
+    build_meal_narration_script,
+    load_css,
+    local_image_data_uri,
+    meal_icon,
+    meal_label,
+)
 
 
 st.set_page_config(
@@ -118,7 +125,7 @@ def generate_current_plan(
 
     with st.spinner("Crafting your personalized meal plan…"):
         try:
-            html_output, titles, meals = generate_meal_plan(
+            titles, meals = generate_meal_plan(
                 ingredients=ingredients,
                 kcal=kcal,
                 exact_ingredients=exact_ingredients,
@@ -127,6 +134,7 @@ def generate_current_plan(
                 model=model_choice,
                 temperature=temperature,
             )
+            html_output = build_downloadable_meal_plan_html(meals, kcal)
 
             st.session_state["html_output"] = html_output
             st.session_state["titles"] = titles

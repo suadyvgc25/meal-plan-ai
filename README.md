@@ -93,14 +93,12 @@ This separation keeps the AI/business logic easier to understand and easier to r
 
 1. The user enters ingredients, a calorie target, and optional preferences.
 2. The app sends a structured prompt to OpenAI requesting JSON output.
-3. The response includes:
-   - Full rendered HTML
-   - Recipe titles
-   - Structured meal data for breakfast, lunch, and dinner
+3. The response includes structured meal data for breakfast, lunch, and dinner.
 4. The app parses the structured response and stores the result in Streamlit session state.
-5. If image generation is enabled, the app generates a food image for each meal.
-6. If narration is selected, the app builds a spoken recipe script from each meal's title, ingredients, and instructions, then converts it into MP3 audio.
-7. The UI renders the final result as custom meal cards with images, calories, ingredients, audio controls, and downloads.
+5. The downloadable HTML plan is generated locally from the structured meal data.
+6. If image generation is enabled, the app generates a food image for each meal.
+7. If narration is selected, the app builds a spoken recipe script from each meal's title, ingredients, and instructions, then converts it into MP3 audio.
+8. The UI renders the final result as custom meal cards with images, calories, ingredients, audio controls, and downloads.
 
 ## Setup
 
@@ -202,7 +200,7 @@ The `.gitignore` file excludes `.streamlit/secrets.toml` so private API keys are
 8. Select which meals should receive audio narration.
 9. Click Generate Meal Plan.
 10. Review the generated meal cards.
-11. Play narration, download MP3 files, or download the full HTML plan.
+11. Play narration, download MP3 files, or download the locally generated HTML plan.
 
 ## Design Notes
 
@@ -227,7 +225,7 @@ The UI was refined through several design passes to better match the provided re
 - Narrated meals use native audio controls so users can play, pause, and replay.
 - MP3 downloads use Streamlit's native download button for reliable file downloads.
 - The creativity temperature control was removed from the UI and fixed internally to reduce user-facing errors.
-- The full generated HTML is still available in an expandable section for transparency.
+- A printable HTML plan is generated locally from the structured meal data and shown in an expandable section.
 
 ## Current Limitations
 

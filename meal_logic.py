@@ -26,13 +26,12 @@ def generate_meal_plan(
     diet: str | None = None,
     model: str = "gpt-3.5-turbo",
     temperature: float = 1.0,
-) -> tuple[str, list[str], dict]:
+) -> tuple[list[str], dict]:
     """
-    Generate a daily meal plan and return (html, recipe_titles, meals).
+    Generate a daily meal plan and return (recipe_titles, meals).
 
     Returns
     -------
-    html : str          Full HTML meal plan ready to render.
     titles : list[str]  ["Breakfast title", "Lunch title", "Dinner title"]
     meals : dict        {"breakfast": {title, calories, ingredients, instructions}, ...}
     """
@@ -59,7 +58,7 @@ def generate_meal_plan(
     prompt = f"""
 Create a healthy daily meal plan for breakfast, lunch, and dinner based on the
 following ingredients: ```{ingredients}```
-Return the meal plan in HTML, but wrap that HTML inside a JSON object.
+Return the meal plan as structured JSON.
 Follow the instructions below carefully.
 
 ### Instructions:
@@ -78,12 +77,6 @@ If a dietary restriction is provided, do not include ingredients that violate it
 
 Return ONLY valid JSON in this exact format:
 {{
-  "html": "<full HTML and CSS meal plan here>",
-  "recipe_titles": [
-    "Recipe title 1",
-    "Recipe title 2",
-    "Recipe title 3"
-  ],
   "meals": {{
     "breakfast": {{
       "title": "Breakfast recipe title",
@@ -109,10 +102,8 @@ Return ONLY valid JSON in this exact format:
 Do not wrap the JSON in ```json.
 Do not wrap the JSON in markdown code fences.
 Do not include explanations outside the JSON.
-The "html" field must contain the COMPLETE, FULLY RENDERED HTML meal plan with all three meals.
-Do NOT use placeholder text like "HTML meal plan goes here" or "Full recipe here" anywhere.
 The "instructions" arrays must contain the actual step-by-step cooking instructions — not placeholders.
-Write everything out in full. The JSON will be large — that is expected and required.
+Write everything out in full.
 """
 
     response = client.chat.completions.create(
@@ -123,13 +114,13 @@ Write everything out in full. The JSON will be large — that is expected and re
                 "content": (
                     "You are a skilled cook with the expertise of a chef. "
                     "Always return complete, fully written recipes. "
-                    "Never use placeholder text. The JSON response will be large — that is expected."
+                    "Never use placeholder text."
                 ),
             },
             {"role": "user", "content": prompt},
         ],
         temperature=temperature,
-        max_tokens=4000,
+        max_tokens=3000,
     )
 
     raw = response.choices[0].message.content.strip()
@@ -139,12 +130,16 @@ Write everything out in full. The JSON will be large — that is expected and re
         lines = raw.splitlines()
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-    data          = json.loads(raw)
-    html          = data.get("html", "")
-    recipe_titles = data.get("recipe_titles", [])
-    meals         = data.get("meals", {})
+    data = json.loads(raw)
+    meals = data.get("meals", {})
+    meal_order = ["breakfast", "lunch", "dinner"]
+    recipe_titles = [
+        str(meals[key].get("title", "")).strip()
+        for key in meal_order
+        if isinstance(meals.get(key), dict) and meals[key].get("title")
+    ]
 
-    return html, recipe_titles, meals
+    return recipe_titles, meals
 
 
 def generate_meal_image(

@@ -113,6 +113,185 @@ def render_compact_bullets(items: list[str], max_items: int = 5) -> str:
     return "<ul>" + "".join(f"<li>{escape(item)}</li>" for item in shown) + "</ul>"
 
 
+def build_downloadable_meal_plan_html(meals: dict[str, Any], kcal: int) -> str:
+    """Build a standalone HTML meal plan from structured meal data."""
+    keys = meal_keys_from_data(meals)
+    meal_sections = []
+
+    for key in keys:
+        meal = meals.get(key, {})
+        if not isinstance(meal, dict):
+            meal = {"details": meal}
+
+        title = get_meal_title(key, meal, [])
+        calories = get_meal_calories(meal)
+        ingredients = as_list(get_meal_value(meal, ["ingredients", "ingredient_list", "items"], ""))
+        instructions = as_list(get_meal_value(meal, ["instructions", "steps", "method", "directions"], ""))
+
+        ingredients_html = (
+            "".join(f"<li>{escape(ingredient)}</li>" for ingredient in ingredients)
+            if ingredients
+            else "<li>No ingredients returned.</li>"
+        )
+        instructions_html = (
+            "".join(f"<li>{escape(step)}</li>" for step in instructions)
+            if instructions
+            else "<li>No preparation steps returned.</li>"
+        )
+        calories_html = f'<span class="calories">{escape(calories)}</span>' if calories else ""
+
+        meal_sections.append(
+            f"""
+            <article class="meal-card">
+              <div class="meal-label">{escape(meal_icon(key))} {escape(meal_label(key))}</div>
+              <h2>{escape(title)}</h2>
+              {calories_html}
+              <section>
+                <h3>Ingredients</h3>
+                <ul>{ingredients_html}</ul>
+              </section>
+              <section>
+                <h3>Instructions</h3>
+                <ol>{instructions_html}</ol>
+              </section>
+            </article>
+            """
+        )
+
+    meal_count = len(keys) or 3
+    rendered_meals = "\n".join(meal_sections) or "<p>No structured meal data was returned.</p>"
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily Meal Plan</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --green: #123f2c;
+      --muted: #6d7972;
+      --line: #dfe8df;
+      --chip: #e9f2e5;
+      --paper: #fffef9;
+      --bg: #f8faf3;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1f2f27;
+      background: radial-gradient(circle at top right, #fff 0%, var(--bg) 42%, #f3f8ef 100%);
+      line-height: 1.6;
+    }}
+    main {{
+      width: min(1060px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0 64px;
+    }}
+    header {{
+      margin-bottom: 28px;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      color: var(--green);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2rem, 5vw, 3.6rem);
+      line-height: 1.05;
+    }}
+    .summary {{
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      color: #23362d;
+      font-weight: 700;
+    }}
+    .tag,
+    .calories {{
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--green);
+      font-weight: 800;
+      padding: 0.38rem 0.9rem;
+    }}
+    .meal-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 22px;
+    }}
+    .meal-card {{
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 100%;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 20px 48px rgba(18, 63, 44, 0.08);
+      padding: 24px;
+    }}
+    .meal-label {{
+      align-self: flex-start;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--green);
+      font-size: 0.82rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      padding: 0.4rem 0.85rem;
+      text-transform: uppercase;
+    }}
+    h2 {{
+      margin: 0;
+      color: var(--green);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.85rem;
+      line-height: 1.1;
+    }}
+    h3 {{
+      margin: 0 0 8px;
+      color: var(--green);
+      font-size: 0.92rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }}
+    ul,
+    ol {{
+      margin: 0;
+      padding-left: 1.25rem;
+    }}
+    li + li {{
+      margin-top: 0.42rem;
+    }}
+    @media print {{
+      body {{ background: #fff; }}
+      main {{ width: 100%; padding: 24px; }}
+      .meal-card {{ break-inside: avoid; box-shadow: none; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Healthy Daily Meal Plan</h1>
+      <div class="summary">
+        <span>{meal_count} meals • ~{escape(kcal)} kcal</span>
+        <span class="tag">Balanced &amp; Nutritious</span>
+      </div>
+    </header>
+    <section class="meal-grid">
+      {rendered_meals}
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def build_meal_narration_script(key: str, meal: dict[str, Any]) -> str:
     """Build a complete spoken recipe script from structured meal data."""
     title = safe_text(get_meal_value(meal, ["title", "name", "meal_title"], meal_label(key)))
