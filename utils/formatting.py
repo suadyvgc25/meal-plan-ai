@@ -147,7 +147,7 @@ def image_data_uri(image_bytes: bytes | None) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def local_image_data_uri(path: str) -> str:
+def local_image_data_uri(path: str | Path) -> str:
     """Convert a local image asset into an embeddable data URI."""
     image_path = Path(path)
     if not image_path.exists():
@@ -156,7 +156,7 @@ def local_image_data_uri(path: str) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def load_css(path: str) -> None:
+def load_css(path: str | Path) -> None:
     """Load a CSS file into the Streamlit page."""
     css_path = Path(path)
     if not css_path.exists():

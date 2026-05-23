@@ -8,6 +8,7 @@ The app is intentionally split by responsibility:
 """
 
 import os
+from pathlib import Path
 
 import streamlit as st
 
@@ -26,7 +27,8 @@ st.set_page_config(
 )
 
 
-HERO_BG_URI = local_image_data_uri("assets/images/hero-integrated-bg.png")
+BASE_DIR = Path(__file__).resolve().parent
+HERO_BG_URI = local_image_data_uri(BASE_DIR / "assets/images/hero-integrated-bg.png")
 
 
 def load_dynamic_hero_background(hero_bg_uri: str) -> None:
@@ -171,7 +173,7 @@ def generate_narrations(narrate_keys: list[str], tts_voice: str, tts_quality: st
 
 
 configure_openai_key()
-load_css("styles/style.css")
+load_css(BASE_DIR / "styles/style.css")
 load_dynamic_hero_background(HERO_BG_URI)
 
 sidebar_values = render_sidebar()
