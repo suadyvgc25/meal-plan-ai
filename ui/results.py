@@ -113,7 +113,7 @@ def _render_meal_cards(
                     )
                 )
 
-                cached_image = st.session_state["images"].get(title)
+                cached_image = st.session_state["images"].get(title) if generate_images else None
 
                 if generate_images and not cached_image:
                     if not os.environ.get("OPENAI_API_KEY"):
@@ -155,26 +155,26 @@ def _render_meal_card(
 ) -> None:
     """Render one meal card and its narration/download state."""
     image_uri = image_data_uri(cached_image)
-    image_html = (
+    media_html = (
+        '<div class="target-meal-media">'
         f'<img src="{image_uri}" alt="{escape(title)}">'
+        '</div>'
         if image_uri
-        else f'<div class="target-meal-fallback">{meal_icon(key)}</div>'
+        else ""
     )
     calories_html = f'<span class="calorie-pill">{escape(calories)}</span>' if calories else ""
     audio = st.session_state["narrations"].get(key)
 
     with st.container(key=f"meal_card_{key}_{index}"):
         st.html(
-            '<div class="target-meal-card-layout">'
+            f'<div class="target-meal-card-layout{" target-meal-card-layout--no-image" if not image_uri else ""}">'
             '<div class="target-meal-label">'
             f'<span class="target-meal-label-icon">{meal_icon(key)}</span>'
             f'<span>{escape(meal_label(key))}</span>'
             '</div>'
             f'<h3 class="target-meal-title">{escape(title)}</h3>'
             f'<div class="target-meal-calories">{calories_html}</div>'
-            '<div class="target-meal-media">'
-            f'{image_html}'
-            '</div>'
+            f'{media_html}'
             '<div class="target-meal-content">'
             f'{render_compact_bullets(ingredients_list, max_items=5)}'
             '</div>'

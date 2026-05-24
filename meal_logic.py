@@ -24,7 +24,7 @@ def generate_meal_plan(
     exact_ingredients: bool = False,
     extra: str | None = None,
     diet: str | None = None,
-    model: str = "gpt-3.5-turbo",
+    model: str = "gpt-4o-mini",
     temperature: float = 1.0,
 ) -> tuple[list[str], dict]:
     """

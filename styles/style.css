@@ -1093,8 +1093,17 @@ header {
   box-shadow: 0 12px 28px rgba(18, 63, 44, 0.08);
 }
 
+[class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]):has(.target-meal-card-layout--no-image) {
+  min-height: 440px;
+  height: auto;
+}
+
 [class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]) [data-testid="stVerticalBlock"] {
   height: 100%;
+}
+
+[class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]):has(.target-meal-card-layout--no-image) [data-testid="stVerticalBlock"] {
+  height: auto;
 }
 
 [class*="st-key-meal_card_actions_"] {
@@ -1106,6 +1115,10 @@ header {
   border: 0 !important;
   border-top: 1px dashed rgba(18, 63, 44, 0.12) !important;
   box-shadow: none !important;
+}
+
+[class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]):has(.target-meal-card-layout--no-image) [class*="st-key-meal_card_actions_"] {
+  margin-top: 0.75rem !important;
 }
 
 [class*="st-key-meal_card_actions_"] [data-testid="stVerticalBlock"] {
@@ -1234,6 +1247,10 @@ header {
   min-width: 0;
   padding: 0.25rem 0 0;
   flex: 1 1 auto;
+}
+
+.target-meal-card-layout--no-image .target-meal-content {
+  flex: 0 0 auto;
 }
 
 .target-meal-content ul {
@@ -1406,6 +1423,11 @@ header {
   [class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]) {
     min-height: 650px;
     height: 650px;
+  }
+
+  [class*="st-key-meal_card_"]:not([class*="st-key-meal_card_actions_"]):has(.target-meal-card-layout--no-image) {
+    min-height: 430px;
+    height: auto;
   }
 
   .target-meal-title {
