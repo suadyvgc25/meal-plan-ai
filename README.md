@@ -8,7 +8,7 @@ This project was built as a portfolio piece to demonstrate practical AI product 
 
 Daily Meal Planner helps a user plan breakfast, lunch, and dinner from ingredients they already have. The user provides a calorie target, ingredients, optional preferences, and dietary restrictions. The app then generates a complete meal plan using OpenAI, displays the result in a custom-designed Streamlit interface, and can optionally generate realistic dish images and MP3 narration for selected meals.
 
-The application focuses on making AI output feel usable, not just generated. The results are displayed as clean meal cards with structured ingredients, calorie information, generated images, and audio controls. Users can also download the full meal plan as HTML and download individual narration files as MP3s.
+The application focuses on making AI output feel usable, not just generated. The model returns structured meal data, and the app renders that data as clean meal cards with ingredients, calorie information, generated images, and audio controls. Users can also download a locally generated HTML version of the meal plan and download individual narration files as MP3s.
 
 ## Key Features
 
@@ -22,7 +22,7 @@ The application focuses on making AI output feel usable, not just generated. The
 - Optional audio narration for breakfast, lunch, and/or dinner
 - In-card audio playback with native play, pause, and replay controls
 - MP3 download for each narrated meal
-- HTML download for the full generated meal plan
+- Locally generated HTML download for the full meal plan
 - Responsive layout for desktop, tablet, and mobile
 - Custom visual styling to match a polished meal-planning product design
 
@@ -36,7 +36,7 @@ The project demonstrates:
 
 - Prompt engineering for structured JSON responses
 - Separation of business logic from UI code
-- Handling model output safely enough for display
+- Local rendering from structured model output instead of displaying raw generated HTML
 - AI image generation and text-to-speech integration
 - Streamlit customization beyond default widgets
 - Responsive UI refinement based on visual reference screenshots
@@ -55,6 +55,8 @@ The project demonstrates:
 
 ```text
 meal-plan-ai/
+├── .streamlit/
+│   └── config.toml             # Streamlit theme configuration
 ├── app.py                       # Streamlit entry point and app orchestration
 ├── meal_logic.py                # OpenAI API calls and meal generation logic
 ├── requirements.txt             # Python dependencies
@@ -70,7 +72,8 @@ meal-plan-ai/
 │   ├── meal_form.py             # Hero, ingredient inputs, narration controls, and CTA
 │   └── results.py               # Generated meal cards, audio controls, and downloads
 ├── utils/
-    └── formatting.py            # Shared formatting, parsing, and asset helpers
+│   └── formatting.py            # Shared formatting, parsing, and asset helpers
+└── .gitignore                   # Ignores secrets, cache files, virtual environments, and local design files
 ```
 
 ## Architecture
@@ -84,7 +87,7 @@ The app is intentionally split into focused modules:
 | `ui/sidebar.py` | Renders sidebar settings such as calories, model choice, exact ingredient mode, and image generation. |
 | `ui/meal_form.py` | Renders the hero section, ingredient form, preference inputs, narration controls, and generate button. |
 | `ui/results.py` | Renders result headers, meal cards, images, audio controls, MP3 downloads, and the full HTML expander. |
-| `utils/formatting.py` | Contains reusable helpers for text escaping, ingredient parsing, meal labels, calories, bullets, CSS loading, and image data URIs. |
+| `utils/formatting.py` | Contains reusable helpers for text escaping, ingredient parsing, meal labels, calories, bullets, local HTML generation, narration scripts, CSS loading, and image data URIs. |
 | `styles/style.css` | Custom stylesheet loaded by Streamlit at runtime. |
 
 This separation keeps the AI/business logic easier to understand and easier to reuse outside the UI.
@@ -97,7 +100,7 @@ This separation keeps the AI/business logic easier to understand and easier to r
 4. The app parses the structured response and stores the result in Streamlit session state.
 5. The downloadable HTML plan is generated locally from the structured meal data.
 6. If image generation is enabled, the app generates a food image for each meal.
-7. If narration is selected, the app builds a spoken recipe script from each meal's title, ingredients, and instructions, then converts it into MP3 audio.
+7. If narration is selected and recipe instructions are available, the app builds a spoken recipe script from each meal's title, ingredients, and instructions, then converts it into MP3 audio.
 8. The UI renders the final result as custom meal cards with images, calories, ingredients, audio controls, and downloads.
 
 ## Setup
@@ -134,6 +137,19 @@ http://localhost:8501
 ```
 
 If port `8501` is already in use, Streamlit may use another port such as `8502`.
+
+## Model Configuration
+
+The meal-plan model selector lives in `ui/sidebar.py`.
+
+The current options are:
+
+```text
+gpt-4o-mini
+gpt-4o
+```
+
+`gpt-4o-mini` is the default model because it is fast, cost-conscious, and strong enough for structured recipe generation. The temperature is fixed internally at `1.0` to keep the UI simpler and avoid user-facing configuration errors.
 
 ## Streamlit Theme
 
@@ -188,6 +204,35 @@ In local Streamlit development, the recommended place is:
 
 The `.gitignore` file excludes `.streamlit/secrets.toml` so private API keys are not committed.
 
+For Streamlit Community Cloud, add the same key in the app's Secrets settings:
+
+```toml
+OPENAI_API_KEY = "your_api_key_here"
+```
+
+The tracked `.streamlit/config.toml` only contains visual theme settings and is safe to commit.
+
+## Deployment
+
+This app is ready to deploy on Streamlit Community Cloud.
+
+Recommended deployment settings:
+
+```text
+Main file path: app.py
+Python dependencies: requirements.txt
+Secret name: OPENAI_API_KEY
+```
+
+After deployment, confirm:
+
+- The hero background image loads from `assets/images/hero-integrated-bg.png`.
+- The custom CSS loads from `styles/style.css`.
+- Meal generation works with `gpt-4o-mini`.
+- Dish images generate only when the image toggle is enabled.
+- Narration generates only for selected meals that include recipe instructions.
+- The HTML download opens as a printable meal plan.
+
 ## Using the App
 
 1. Enter a daily calorie target.
@@ -226,6 +271,9 @@ The UI was refined through several design passes to better match the provided re
 - MP3 downloads use Streamlit's native download button for reliable file downloads.
 - The creativity temperature control was removed from the UI and fixed internally to reduce user-facing errors.
 - A printable HTML plan is generated locally from the structured meal data and shown in an expandable section.
+- Recipe instruction numbering is normalized before display and narration, preventing duplicate numbering such as `1. 1. Preheat...`.
+- If dish images are disabled, meal cards omit the image area instead of showing a placeholder.
+- If recipe instructions are missing, narration is skipped instead of generating an incomplete MP3.
 
 ## Current Limitations
 
@@ -245,7 +293,7 @@ The UI was refined through several design passes to better match the provided re
 - Add stricter nutrition validation
 - Add user authentication for saved plans
 - Add persistent storage with a database
-- Add deployment instructions for Streamlit Community Cloud or another hosting platform
+- Add automated tests for parsing, formatting, and generated HTML
 
 ## Portfolio Highlights
 
@@ -256,7 +304,7 @@ This project is a good example of:
 - Combining text, image, and audio generation in one product
 - Creating a polished UI inside Streamlit
 - Iterating from screenshots and design references
-- Handling generated artifacts such as HTML, images, and MP3 files
+- Handling generated artifacts such as locally rendered HTML, generated images, and MP3 files
 
 ## Disclaimer
 
