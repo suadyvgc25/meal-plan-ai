@@ -91,6 +91,20 @@ The app is intentionally split into focused modules:
 
 This separation keeps the AI/business logic easier to understand and easier to reuse outside the UI.
 
+## Screenshots
+
+### Main Planner
+
+![Daily Meal Planner desktop view](assets/screenshots/meal-plan-desktop.png)
+
+### Generated Meal Cards
+
+![Generated meal cards](assets/screenshots/meal-cards.png)
+
+### Mobile View
+
+![Mobile meal planner view](assets/screenshots/meal-plan-mobile.png)
+
 ## How It Works
 
 1. The user enters ingredients, a calorie target, and optional preferences.
