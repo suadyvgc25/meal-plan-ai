@@ -110,6 +110,11 @@ This separation keeps the AI/business logic easier to understand and easier to r
 ### Mobile View
 
 ![Mobile meal planner view](assets/screenshots/meal-plan-mobile.png)
+![Mobile meal planner view 2](assets/screenshots/meal-plan-mobile2.png)
+![Mobile meal planner view 3](assets/screenshots/meal-plan-mobile3.png)
+![Mobile Generated meal cards ](assets/screenshots/meal-cards-mobile.png)
+![Mobile Generated meal cards 2](assets/screenshots/meal-cards-mobile2.png)
+![Mobile Generated meal cards 3](assets/screenshots/meal-cards-mobile3.png)
 
 ## How It Works
 
