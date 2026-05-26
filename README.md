@@ -4,6 +4,10 @@ An AI-powered meal planning app that turns a list of ingredients into a full day
 
 This project was built as a portfolio piece to demonstrate practical AI product design: prompt-driven structured generation, image generation, text-to-speech, Streamlit UI engineering, responsive layout work, and a polished visual system inspired by a high-fidelity design reference.
 
+## My Role
+
+I designed and built the full application: prompt structure, OpenAI integration, Streamlit UI, responsive styling, audio generation, image generation, and deployment.
+
 ## Overview
 
 Daily Meal Planner helps a user plan breakfast, lunch, and dinner from ingredients they already have. The user provides a calorie target, ingredients, optional preferences, and dietary restrictions. The app then generates a complete meal plan using OpenAI, displays the result in a custom-designed Streamlit interface, and can optionally generate realistic dish images and MP3 narration for selected meals.
@@ -30,9 +34,11 @@ The application focuses on making AI output feel usable, not just generated. The
 
 This app explores a common real-world AI product challenge: turning a flexible natural-language model into a structured, user-friendly experience.
 
+I built an AI meal-planning app that turns user ingredients into a structured full-day meal plan. The app uses OpenAI for recipe generation, optional image generation, and optional text-to-speech narration.
+
 Instead of showing raw model output, the app asks the model for a predictable JSON structure, extracts the meal data, and renders it into an interface designed for scanning and action. The result is closer to a production product flow than a simple chatbot demo.
 
-The project demonstrates:
+The project demonstrates how to turn flexible AI output into a usable product experience with structured JSON, local rendering, downloadable artifacts, and a responsive interface:
 
 - Prompt engineering for structured JSON responses
 - Separation of business logic from UI code
