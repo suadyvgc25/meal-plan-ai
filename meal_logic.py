@@ -82,19 +82,19 @@ Return ONLY valid JSON in this exact format:
       "title": "Breakfast recipe title",
       "calories": "520 kcal",
       "ingredients": ["Ingredient 1", "Ingredient 2"],
-      "instructions": ["Step 1", "Step 2", "Step 3"]
+      "instructions": ["Preheat the oven.", "Cook the ingredients.", "Serve warm."]
     }},
     "lunch": {{
       "title": "Lunch recipe title",
       "calories": "680 kcal",
       "ingredients": ["Ingredient 1", "Ingredient 2"],
-      "instructions": ["Step 1", "Step 2", "Step 3"]
+      "instructions": ["Prepare the ingredients.", "Cook until done.", "Serve warm."]
     }},
     "dinner": {{
       "title": "Dinner recipe title",
       "calories": "630 kcal",
       "ingredients": ["Ingredient 1", "Ingredient 2"],
-      "instructions": ["Step 1", "Step 2", "Step 3"]
+      "instructions": ["Prepare the ingredients.", "Cook until done.", "Serve warm."]
     }}
   }}
 }}
@@ -103,6 +103,7 @@ Do not wrap the JSON in ```json.
 Do not wrap the JSON in markdown code fences.
 Do not include explanations outside the JSON.
 The "instructions" arrays must contain the actual step-by-step cooking instructions — not placeholders.
+Do not include numbering inside instruction strings. Each instruction should be plain text.
 Write everything out in full.
 """
 

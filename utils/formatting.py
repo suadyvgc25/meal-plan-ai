@@ -2,6 +2,7 @@
 
 import base64
 import html
+import re
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,17 @@ def render_compact_bullets(items: list[str], max_items: int = 5) -> str:
     return "<ul>" + "".join(f"<li>{escape(item)}</li>" for item in shown) + "</ul>"
 
 
+def strip_step_marker(step: str) -> str:
+    """Remove leading numbering from a recipe instruction."""
+    text = safe_text(step)
+    return re.sub(r"^\s*(?:step\s*)?\d+\s*[\).:\-]?\s*", "", text, flags=re.IGNORECASE).strip()
+
+
+def normalize_instruction_steps(value: Any) -> list[str]:
+    """Return instruction steps without model-provided leading numbers."""
+    return [step for item in as_list(value) if (step := strip_step_marker(item))]
+
+
 def build_downloadable_meal_plan_html(meals: dict[str, Any], kcal: int) -> str:
     """Build a standalone HTML meal plan from structured meal data."""
     keys = meal_keys_from_data(meals)
@@ -126,7 +138,9 @@ def build_downloadable_meal_plan_html(meals: dict[str, Any], kcal: int) -> str:
         title = get_meal_title(key, meal, [])
         calories = get_meal_calories(meal)
         ingredients = as_list(get_meal_value(meal, ["ingredients", "ingredient_list", "items"], ""))
-        instructions = as_list(get_meal_value(meal, ["instructions", "steps", "method", "directions"], ""))
+        instructions = normalize_instruction_steps(
+            get_meal_value(meal, ["instructions", "steps", "method", "directions"], "")
+        )
 
         ingredients_html = (
             "".join(f"<li>{escape(ingredient)}</li>" for ingredient in ingredients)
@@ -297,7 +311,9 @@ def build_meal_narration_script(key: str, meal: dict[str, Any]) -> str:
     title = safe_text(get_meal_value(meal, ["title", "name", "meal_title"], meal_label(key)))
     calories = get_meal_calories(meal)
     ingredients = as_list(get_meal_value(meal, ["ingredients", "ingredient_list", "items"], ""))
-    instructions = as_list(get_meal_value(meal, ["instructions", "steps", "method", "directions"], ""))
+    instructions = normalize_instruction_steps(
+        get_meal_value(meal, ["instructions", "steps", "method", "directions"], "")
+    )
 
     if not instructions:
         return ""
