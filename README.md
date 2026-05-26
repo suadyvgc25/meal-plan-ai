@@ -64,7 +64,6 @@ meal-plan-ai/
 ├── assets/
 │   └── images/
 │       ├── hero-integrated-bg.png   # Integrated hero background artwork
-│       └── hero-salad.png           # Salad image asset
 ├── styles/
 │   └── style.css                # Custom CSS loaded by Streamlit
 ├── ui/
